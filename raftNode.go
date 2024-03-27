@@ -27,6 +27,8 @@ type VoteReply struct {
 type AppendEntryArgument struct {
 	Term     int
 	LeaderID int
+	Entries []LogEntry
+	PrevLogEntry LogEntry
 }
 
 type AppendEntryReply struct {
@@ -40,14 +42,49 @@ type ServerConnection struct {
 	rpcConnection *rpc.Client
 }
 
+type LogEntry struct {
+	Index int
+	Term int
+}
+	
 type RaftNode struct {
 	selfID          int
 	serverNodes     []ServerConnection
+	lastAppliedIndex int
 	currentTerm     int
 	votedFor        int
 	state           string // "follower", "candidate", "leader"
 	Mutex           sync.Mutex
 	electionTimeout *time.Timer
+	commitIndex int 
+	nextIndex  map[int]int // nodeID: nodeIndex
+
+	//log can be a key value pair where key is log entry number and pair is the log entry
+	// {1: "log1", 2: "log2"}
+}
+
+
+// This function is designed to emulate a client reaching out to the
+//server. Note that many of the realistic details are removed, for simplicity
+func (node *RaftNode) ClientAddToLog() {
+	// In a realistic scenario, the client will find the leader node and
+	//communicate with it. In this implementation, we are pretending that the client reached
+	//out to the server somehow
+	// But any new log entries will not be created unless the server /node is a leader
+	// isLeader here is a boolean to indicate whether the node is a leader or not
+	if node.state == "leader" {
+		// lastAppliedIndex here is an int variable that is needed by a node to store the value of the last index it used in the log
+		entry := LogEntry{lastAppliedIndex, currentTerm}
+		log.Println("Client communication created the new log entry at index " + strconv.Itoa(entry.Index))
+		
+		// Add rest of logic here
+		// HINT 1: using the AppendEntry RPC might happen here
+	}
+	// HINT 2: force the thread to sleep for a good amount of time (less
+	//than that of the leader election timer) and then repeat the actions above.
+	//You may use an endless loop here or recursively call the function
+	// HINT 3: you don’t need to add to the logic of creating new log
+	//entries, just handle the replication
 }
 
 // The AppendEntry RPC as defined in Raft
@@ -198,16 +235,6 @@ func (node *RaftNode) LeaderElection() {
 		node.transitionToFollower()
 	}
 
-	// Uncomment this to simulate leader failure
-	// timer := time.NewTimer(5 * time.Second)
-
-	// // Wait for the timer to expire
-	// <-timer.C
-
-	// // Timer has expired
-	// fmt.Println("Simulating leader failure")
-	// node.transitionToFollower()
-
 }
 
 // You may use this function to help with handling the periodic heartbeats
@@ -229,6 +256,7 @@ func Heartbeat(node *RaftNode, peers []ServerConnection) {
 					args := AppendEntryArgument{
 						Term:     node.currentTerm,
 						LeaderID: node.selfID,
+			
 					}
 
 					// Create a reply variable to store the response
@@ -403,3 +431,27 @@ func main() {
 	// ** If node is leader, then call heartbeats all the time
 
 }
+
+
+/*
+1. client reaches out to servers
+2. if server is leader, it will append that entry to its log
+3. it will send that entry via AppendEntry to all other servers
+	Case 1: Missing entries
+	a. for each server, if server's last term is outdated, it fails, and leader will decrement 
+	next index and try again until they find a match.  
+	Case 2: Wrong entries (mismatch)
+	a. for each server, if server's last entry is diff but at the same index as leader's, then delete, 
+	delete entry and all that follow until a match is found
+	b. Delete any entries after that point and replace with the 
+	append any new entries not already in the log, until the server's last log index == leader's commitIndex
+
+4. If majority of the servers replicate it then leader commits entry, notifies servers it has committed
+
+*/
+
+/*Questions:
+1. In order for servers to replicate all the logs (handle inconsistency) do we compare their logs to commitIndex vs prevLogIndex (before confirming they have replicated it to leader)
+2. are we doing state machine stuff
+3.
+*/
