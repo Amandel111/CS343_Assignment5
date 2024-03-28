@@ -27,8 +27,10 @@ type VoteReply struct {
 type AppendEntryArgument struct {
 	Term     int
 	LeaderID int
-	Entries []LogEntry
+	Entries LogEntry
 	PrevLogEntry LogEntry
+	prevLogIndex int 
+	leaderCommit int
 }
 
 type AppendEntryReply struct {
@@ -50,14 +52,15 @@ type LogEntry struct {
 type RaftNode struct {
 	selfID          int
 	serverNodes     []ServerConnection
-	lastAppliedIndex int
 	currentTerm     int
 	votedFor        int
 	state           string // "follower", "candidate", "leader"
 	Mutex           sync.Mutex
 	electionTimeout *time.Timer
 	commitIndex int 
+	log []LogEntry
 	nextIndex  map[int]int // nodeID: nodeIndex
+	matchIndex map[int]int //use this for leader to know when majority of servers have replicated an entry
 
 	//log can be a key value pair where key is log entry number and pair is the log entry
 	// {1: "log1", 2: "log2"}
@@ -74,11 +77,52 @@ func (node *RaftNode) ClientAddToLog() {
 	// isLeader here is a boolean to indicate whether the node is a leader or not
 	if node.state == "leader" {
 		// lastAppliedIndex here is an int variable that is needed by a node to store the value of the last index it used in the log
-		entry := LogEntry{lastAppliedIndex, currentTerm}
+		entry := LogEntry{len(node.log), node.currentTerm}
 		log.Println("Client communication created the new log entry at index " + strconv.Itoa(entry.Index))
 		
+		// leader: add entry to log
+		node.log = append(node.log, entry) 
 		// Add rest of logic here
 		// HINT 1: using the AppendEntry RPC might happen here
+		// leader appends log to servers
+
+		// if log list is not empty
+		// if (len(node.log)-1 >= 0){
+		// 	prevLogEntry := len(node.log) - 1
+		// }else{ // if log list is empty
+		// 	prevLogEntry := 0
+		// }
+		
+		//fmt.Println(prevLogEntry)
+		
+		for _, peer := range node.serverNodes {
+			if peer.serverID != node.selfID {
+				// Construct arguments for AppendEntry RPC call
+				args := AppendEntryArgument{
+					Term:     node.currentTerm,
+					LeaderID: node.selfID,
+					Entries: entry,
+					PrevLogEntry: {len(node.log) - 1, log[len(node.log) - 1]},//prevLogEntry, //fix this so that second argument makes sense
+					leaderCommit: node.commitIndex,
+				}
+
+				// Create a reply variable to store the response
+				var reply AppendEntryReply
+
+				// Call AppendEntry RPC on the peer
+				err := peer.rpcConnection.Call("RaftNode.AppendEntry", args, &reply)
+				if err != nil {
+					fmt.Printf("Error sending heartbeat to node %d: %v\n", peer.serverID, err)
+					// Handle the error appropriately, e.g., mark the peer as unreachable
+				} else {
+					fmt.Printf("Sent heartbeat to node %d\n", peer.serverID)
+				}
+			}
+		}
+	} else {
+		// If the node is no longer the leader, stop sending heartbeats
+		node.Mutex.Unlock()
+		return
 	}
 	// HINT 2: force the thread to sleep for a good amount of time (less
 	//than that of the leader election timer) and then repeat the actions above.
@@ -94,6 +138,7 @@ func (node *RaftNode) AppendEntry(arguments AppendEntryArgument, reply *AppendEn
 	node.Mutex.Lock()
 	defer node.Mutex.Unlock()
 	fmt.Println("heartbeat from", arguments.LeaderID)
+	fmt.Println("arguments to AppendEntry for node ", node.selfID, " : ", arguments);
 	// Check if the leader's term is less than receiving
 	if arguments.Term < node.currentTerm {
 		// Reply false if leader's term is older
@@ -171,7 +216,14 @@ func (node *RaftNode) transitionToCandidate() {
 func (node *RaftNode) transitionToLeader() {
 	node.state = "leader"
 	node.resetElectionTimeout() // Reset the election timeout since the node is now leader
+	// Initialize variables
+
+	for _, peer := range node.serverNodes {
+		node.nextIndex[int(peer.serverID)] = len(node.log) + 1
+		node.matchIndex[peer.serverID] = 0
+	} 
 	go Heartbeat(node, node.serverNodes)
+
 }
 
 // You may use this function to help with handling the election time out
@@ -230,6 +282,7 @@ func (node *RaftNode) LeaderElection() {
 		node.Mutex.Unlock()
 		node.transitionToLeader()
 
+
 	} else {
 		fmt.Printf("Node %d failed to become leader for term %d\n", node.selfID, node.currentTerm)
 		node.transitionToFollower()
@@ -256,7 +309,9 @@ func Heartbeat(node *RaftNode, peers []ServerConnection) {
 					args := AppendEntryArgument{
 						Term:     node.currentTerm,
 						LeaderID: node.selfID,
-			
+						Entries: LogEntry{0, 0},
+						PrevLogEntry: LogEntry{0, 0},
+						leaderCommit: 0,
 					}
 
 					// Create a reply variable to store the response
@@ -334,6 +389,8 @@ func main() {
 		state:       "follower",
 		votedFor:    -1,
 		Mutex:       sync.Mutex{},
+		commitIndex: 0,
+	
 	}
 
 	// Following lines are to register the RPCs of this object of type RaftNode
@@ -426,6 +483,7 @@ func main() {
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go node.LeaderElection()
+	go node.ClientAddToLog() 
 	wg.Wait()
 	// ** Once leader election ends, then check if 'I am the leader'
 	// ** If node is leader, then call heartbeats all the time
@@ -445,7 +503,7 @@ func main() {
 	delete entry and all that follow until a match is found
 	b. Delete any entries after that point and replace with the 
 	append any new entries not already in the log, until the server's last log index == leader's commitIndex
-
+	update node's committedIndex every appendEntry to be either leader's commitIndex or index of last new enty
 4. If majority of the servers replicate it then leader commits entry, notifies servers it has committed
 
 */
