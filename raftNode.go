@@ -124,7 +124,7 @@ func (node *RaftNode) ClientAddToLog() {
 			// If the node is no longer the leader, stop sending heartbeats
 			fmt.Println("else statement of CLientCall")
 			// node.Mutex.Unlock()
-			return
+			//return
 		}
 		time.Sleep(40 * time.Millisecond)
 	}
@@ -141,7 +141,7 @@ func (node *RaftNode) ClientAddToLog() {
 func (node *RaftNode) AppendEntry(arguments AppendEntryArgument, reply *AppendEntryReply) error {
 	node.Mutex.Lock()
 	defer node.Mutex.Unlock()
-	fmt.Println("heartbeat from", arguments.LeaderID)
+	//fmt.Println("heartbeat from", arguments.LeaderID)
 	fmt.Println("arguments to AppendEntry for node ", node.selfID, " : ", arguments)
 	// Check if the leader's term is less than receiving
 	if arguments.Term < node.currentTerm {
@@ -328,7 +328,7 @@ func Heartbeat(node *RaftNode, peers []ServerConnection) {
 					fmt.Printf("Error sending heartbeat to node %d: %v\n", peer.serverID, err)
 					// Handle the error appropriately, e.g., mark the peer as unreachable
 				} else {
-					fmt.Printf("Sent heartbeat to node %d\n", peer.Address)
+					//fmt.Printf("Sent heartbeat to node %d\n", peer.Address)
 				}
 				//}
 			}
@@ -468,14 +468,13 @@ func main() {
 	node.electionTimeout = time.NewTimer(tRandom)
 
 	go func() {
-		//thread for each node checking for timeout
 		<-node.electionTimeout.C
 
-		//if node reaches this point, it starts an election because it has not received a heartbeat
 		fmt.Println("start leader election from main timeout")
 		node.LeaderElection()
 	}()
 
+	go node.ClientAddToLog()
 	var wg sync.WaitGroup
 	wg.Add(1)
 	wg.Wait()
