@@ -75,60 +75,65 @@ func (node *RaftNode) ClientAddToLog() {
 	//out to the server somehow
 	// But any new log entries will not be created unless the server /node is a leader
 	// isLeader here is a boolean to indicate whether the node is a leader or not
-	if node.state == "leader" {
-		// lastAppliedIndex here is an int variable that is needed by a node to store the value of the last index it used in the log
-		entry := LogEntry{len(node.log), node.currentTerm}
-		log.Println("Client communication created the new log entry at index " + strconv.Itoa(entry.Index))
-		
-		// leader: add entry to log
-		node.log = append(node.log, entry) 
-		// Add rest of logic here
-		// HINT 1: using the AppendEntry RPC might happen here
-		// leader appends log to servers
-
-		// if log list is not empty
-		// if (len(node.log)-1 >= 0){
-		// 	prevLogEntry := len(node.log) - 1
-		// }else{ // if log list is empty
-		// 	prevLogEntry := 0
-		// }
-		
-		//fmt.Println(prevLogEntry)
-		
-		for _, peer := range node.serverNodes {
-			if peer.serverID != node.selfID {
-				// Construct arguments for AppendEntry RPC call
-				args := AppendEntryArgument{
-					Term:     node.currentTerm,
-					LeaderID: node.selfID,
-					Entries: entry,
-					PrevLogEntry: {len(node.log) - 1, log[len(node.log) - 1]},//prevLogEntry, //fix this so that second argument makes sense
-					leaderCommit: node.commitIndex,
+	for {
+		fmt.Println("node status is ", node.state, "it is the leader: ", node.state == "leader")
+		if node.state == "leader" {
+			// lastAppliedIndex here is an int variable that is needed by a node to store the value of the last index it used in the log
+			entry := LogEntry{len(node.log), node.currentTerm}
+			log.Println("Client communication created the new log entry at index " + strconv.Itoa(entry.Index))
+			
+			// leader: add entry to log
+			node.log = append(node.log, entry) 
+			// Add rest of logic here
+			// HINT 1: using the AppendEntry RPC might happen here
+			// leader appends log to servers
+			var prevLogEntry LogEntry
+			//if log list is not empty
+			if (len(node.log)-1 != 0){	
+				prevLogEntry = node.log[len(node.log) - 1]
+				}else{ // if log list is empty
+				prevLogEntry = LogEntry{0, 0}
 				}
 
-				// Create a reply variable to store the response
-				var reply AppendEntryReply
+			fmt.Println("Previous Log Entry: ", prevLogEntry)
+			
+			for _, peer := range node.serverNodes {
+				if peer.serverID != node.selfID {
+					// Construct arguments for AppendEntry RPC call
+					args := AppendEntryArgument{
+						Term:     node.currentTerm,
+						LeaderID: node.selfID,
+						Entries: entry,
+						PrevLogEntry:  node.log[len(node.log) - 1],//prevLogEntry, //fix this so that second argument makes sense
+						leaderCommit: node.commitIndex,
+					}
 
-				// Call AppendEntry RPC on the peer
-				err := peer.rpcConnection.Call("RaftNode.AppendEntry", args, &reply)
-				if err != nil {
-					fmt.Printf("Error sending heartbeat to node %d: %v\n", peer.serverID, err)
-					// Handle the error appropriately, e.g., mark the peer as unreachable
-				} else {
-					fmt.Printf("Sent heartbeat to node %d\n", peer.serverID)
+					// Create a reply variable to store the response
+					var reply AppendEntryReply
+
+					// Call AppendEntry RPC on the peer
+					err := peer.rpcConnection.Call("RaftNode.AppendEntry", args, &reply)
+					if err != nil {
+						fmt.Printf("Error sending heartbeat to node %d: %v\n", peer.serverID, err)
+						// Handle the error appropriately, e.g., mark the peer as unreachable
+					} else {
+						fmt.Printf("Sent heartbeat to node %d\n", peer.serverID)
+					}
 				}
 			}
+		} else {
+			// If the node is no longer the leader, stop sending heartbeats
+			fmt.Println("else statement of CLientCall");
+			// node.Mutex.Unlock()
+			return
 		}
-	} else {
-		// If the node is no longer the leader, stop sending heartbeats
-		node.Mutex.Unlock()
-		return
+		time.Sleep(40 * time.Millisecond)
 	}
-	// HINT 2: force the thread to sleep for a good amount of time (less
-	//than that of the leader election timer) and then repeat the actions above.
-	//You may use an endless loop here or recursively call the function
-	// HINT 3: you don’t need to add to the logic of creating new log
-	//entries, just handle the replication
+		// HINT 2: force the thread to sleep for a good amount of time (less
+		//than that of the leader election timer) and then repeat the actions above.
+		//You may use an endless loop here or recursively call the function
+		// HINT 3: you don’t need to add to the logic of creating new log
+		//entries, just handle the replication
 }
 
 // The AppendEntry RPC as defined in Raft
@@ -296,7 +301,7 @@ func Heartbeat(node *RaftNode, peers []ServerConnection) {
 	for { // infinite loop
 		// Lock the node's state for consistency
 		node.Mutex.Lock()
-
+		
 		// Check if the node is the leader
 		if node.state == "leader" && node.votedFor == node.selfID {
 			// Unlock the node's state before sending heartbeats
@@ -390,6 +395,9 @@ func main() {
 		votedFor:    -1,
 		Mutex:       sync.Mutex{},
 		commitIndex: 0,
+		log: make([]LogEntry,0),
+		nextIndex: make(map[int]int),
+		matchIndex: make(map[int]int),
 	
 	}
 
@@ -483,6 +491,7 @@ func main() {
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go node.LeaderElection()
+	wg.Add(1)
 	go node.ClientAddToLog() 
 	wg.Wait()
 	// ** Once leader election ends, then check if 'I am the leader'
@@ -511,5 +520,5 @@ func main() {
 /*Questions:
 1. In order for servers to replicate all the logs (handle inconsistency) do we compare their logs to commitIndex vs prevLogIndex (before confirming they have replicated it to leader)
 2. are we doing state machine stuff
-3.
+3. Where should we call ClientAddToLog
 */
