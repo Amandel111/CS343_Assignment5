@@ -506,33 +506,3 @@ func main() {
 2. are we doing state machine stuff
 3. Where should we call ClientAddToLog
 */
-
-
-/**
-In append entry, if terms all works:
-if (len(node.log) < prevLogIndex) #node list is too short
-{
-	reply false
-}
-if (len(node.log) >= prevLogIndex) #length of node log is at least as up to date as leader's
-{
-	if (node.log[prevLogIndex].term != prevLogTerm){
-		node.log = node.log[0:node.log[prevLogIndex -1] #delete that entry and all that follow
-		return false 
-	}else{
-		#append new entries in log 
-	}
-}
-next
-
-
-
-[(0, 1), (1, 2) (2, 2)]
-[(0, 1), (1,2) (2, 2) (3, 2)]
--------
-In Client Call
-when receive false from RPC:
-1. check that terms work and this is indeed leader node. If term is up to date, false returned bc of node log entry out of date
-	decrement the nextIndex value for that node, and try again until success
-
-/
