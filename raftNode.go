@@ -501,7 +501,51 @@ func main() {
 */
 
 /*Questions:
-1. In order for servers to replicate all the logs (handle inconsistency) do we compare their logs to commitIndex vs prevLogIndex (before confirming they have replicated it to leader)
-2. are we doing state machine stuff
-3. Where should we call ClientAddToLog
+1. When the follower log is greater than the leader's do we have to check for inconsistency and then delete or can we just
+straight up delete everything
+2. how can we test node inconsistencies
+*/
+
+/*
+In append entry, if terms all works:
+if ((len(node.log) -1) < prevLogIndex)      0, 1, 2, 3, 4, 5, 6  index = 6 - 1
+	#log doesn't contain an entry at prevLogIndex,																						 0, 1, 2, 3, 4
+{
+	reply false #client side decrements stuff and retries
+}
+if (len(node.log) -1 > prevLogIndex){
+	//delete any logs that are at a higher index that prevLogIndex,
+	node.log = node.log[0:node.log[prevLogIndex -1] #delete that entry and all that follow
+	if (node.log[prevLogIndex].term != prevLogTerm){
+		node.log = node.log[0:node.log[prevLogIndex -1] #delete that entry and all that follow
+		return false #so that the client will decrement nextINdex until it gets to the newly shortened lsit for this node
+	}
+}else if (len(node.log) -1 == prevLogIndex) #length of node log is at least as up to date as leader's
+{
+	if (node.log[prevLogIndex].term != prevLogTerm){
+		node.log = node.log[0:node.log[prevLogIndex -1] #delete that entry and all that follow
+		return false
+	}else{
+		#append new entries in log
+		return true
+	}
+}
+
+node.log = node.log[0:node.log[prevLogIndex -1] #delete that entry and all that follow
+next
+
+[(0, 1), (1, 2) (2, 2) , (3, 3) (4, 3), (5, 6), (6, 7)] - follower //the nextIndex value for followers nodes is also the entry of the leader's log that we send
+[(0, 1), (1, 2) (2, 2), (3, 2), (4, 3) next: (5, 3), ->---] - leader
+
+-------
+In Client Call
+when receive false from RPC:
+1. check that terms work and this is indeed leader node. If term is up to date, false returned bc of node log entry out of date
+	decrement the nextIndex value for that node, and try again until success, where it passes log[nextIndex] as its entry
+	prevLogIndex= nextIndex[node #] - 1 #used to check for log consistency
+	//if true is returned, increment nextIndex[node #]
+
+
+
+	is prevLogIndex going to change if follower node out of date?
 */
