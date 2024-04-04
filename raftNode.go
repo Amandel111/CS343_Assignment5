@@ -102,7 +102,6 @@ func (node *RaftNode) ClientAddToLog() {
 			for _, peer := range node.serverNodes {
 
 				followerPrevLogIndex := node.nextIndex[peer.serverID] - 1
-				//fmt.Println("I reach here")
 				//if peer.serverID != node.selfID {
 				if len(node.log)-1 >= node.nextIndex[peer.serverID] { //follower is not up to date
 					// Construct arguments for AppendEntry RPC call
@@ -140,6 +139,8 @@ func (node *RaftNode) ClientAddToLog() {
 							fmt.Print("append entry returned success")
 							node.nextIndex[peer.serverID] += 1
 						}
+						fmt.Println("VALUE OF REPLY ", reply.Success)
+
 					}
 				}
 			}
@@ -153,7 +154,7 @@ func (node *RaftNode) ClientAddToLog() {
 			// node.Mutex.Unlock()
 			//return
 		}
-		time.Sleep(1000 * time.Millisecond) //40
+		time.Sleep(4000 * time.Millisecond) //40
 	}
 	// HINT 2: force the thread to sleep for a good amount of time (less
 	//than that of the leader election timer) and then repeat the actions above.
@@ -205,7 +206,10 @@ func (node *RaftNode) AppendEntry(arguments AppendEntryArgument, reply *AppendEn
 			//this is if the log doesn't contain an entry at prevLogIndex
 			reply.Success = false
 			fmt.Print("the follower log does not contain an entry at prevLogIndex ", arguments.PrevLogIndex)
+
 		} else if (len(node.log) - 1) > arguments.PrevLogIndex {
+			fmt.Println("Length of log:", len(node.log))
+			fmt.Println("PrevLogIndex:", arguments.PrevLogIndex)
 			//the follower's log has too many entries
 			fmt.Println("LOG IS TOO LONG FOR NODE ", node.selfID)
 			//delete any logs that are at a higher index that prevLogIndex,
@@ -218,7 +222,7 @@ func (node *RaftNode) AppendEntry(arguments AppendEntryArgument, reply *AppendEn
 			fmt.Println("LOG IS CORRECT LENGTH FOR NODE ", node.selfID)
 			if node.log[arguments.PrevLogIndex].Term != arguments.PrevLogTerm {
 				fmt.Println("LOG HAS WRONG TERM ENTRY FOR NODE ", node.selfID)
-				node.log = node.log[0 : arguments.PrevLogIndex-1] //#delete that entry and all that follow
+				node.log = node.log[0:arguments.PrevLogIndex] //#delete that entry and all that follow
 				reply.Success = false
 			} else {
 				//append new entries in log
