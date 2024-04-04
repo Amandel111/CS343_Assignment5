@@ -87,16 +87,20 @@ func (node *RaftNode) ClientAddToLog() {
 			// Add rest of logic here
 			// HINT 1: using the AppendEntry RPC might happen here
 			// leader appends log to servers
-			var prevLogEntry LogEntry
+			//var prevLogEntry LogEntry
 			//if log list is not empty
-			if len(node.log)-1 != 0 {
-				prevLogEntry = node.log[len(node.log)-1]
-			} else { // if log list is empty
-				prevLogEntry = LogEntry{0, 0}
-			}
-			fmt.Println("Previous Log Entry: ", prevLogEntry)
+			// if len(node.log)-1 != 0 {
+			// 	prevLogEntry = node.log[len(node.log)-1]
+			// 	fmt.Println("Passing")
+
+			// } else { // if log list is empty
+			// 	fmt.Println("PASSING EMPTY LOG 2")
+			// 	prevLogEntry = LogEntry{0, 0}
+			// }
+			//fmt.Println("Previous Log Entry: ", prevLogEntry)
 
 			for _, peer := range node.serverNodes {
+
 				followerPrevLogIndex := node.nextIndex[peer.serverID] - 1
 				//if peer.serverID != node.selfID {
 				if len(node.log)-1 >= node.nextIndex[peer.serverID] { //follower is not up to date
@@ -116,11 +120,12 @@ func (node *RaftNode) ClientAddToLog() {
 					// Call AppendEntry RPC on the peer
 					err := peer.rpcConnection.Call("RaftNode.AppendEntry", args, &reply)
 					if err != nil {
-						fmt.Printf("Error sending heartbeat to node %d: %v\n", peer.serverID, err)
+						fmt.Printf("Error calling AppendEntry in Client to node %d: %v\n", peer.serverID, err)
 						// Handle the error appropriately, e.g., mark the peer as unreachable
 					} else {
-						fmt.Println("log entry appending failed for node ", peer.serverID, "try again")
-						for !reply.Success { // keeps running until reply.success = True
+						if !reply.Success { // keeps running until reply.success = True
+							fmt.Println("log entry appending failed for node ", peer.serverID, "try again")
+
 							//if the rpc failed, two cases: either this is not the leader node, or follower node's log is inconsistent
 
 							//if node.currentTerm < reply.Term{
@@ -129,41 +134,27 @@ func (node *RaftNode) ClientAddToLog() {
 
 							//the follower node's log is inconsistent, decrement nextIndex
 							node.nextIndex[peer.serverID] -= 1
-							//prevLogIndex := node.nextIndex[peer.serverID] - 1 //used to check for log consistency
-
-							// Construct elements for AppendEntry RPC call when decrementing recursively (it has the previous values)
-							/*args = AppendEntryArgument{
-								Term:     node.currentTerm,
-								LeaderID: node.selfID,
-								//Entries:      entry,
-								Entries:      node.log[prevLogIndex+1], //this is the entry following the place where two logs are consistent
-								PrevLogEntry: node.log[prevLogIndex],   //prevLogEntry, //fix this so that second argument makes sense
-								LeaderCommit: node.commitIndex,
-								PrevLogIndex: prevLogIndex,
-							}*/
-							// Call AppendEntry recursively
-							//err := peer.rpcConnection.Call("RaftNode.AppendEntry", args, &reply)
-							//if err != nil {
-							//	fmt.Printf("log entry appending failed for node ", peer.serverID, " after !reply.success try again")
-							//}
-							// Handle the error appropriately, e.g., mark the peer as unreachable
-						}
-						//}
-						if reply.Success {
+						} else {
 							//append worked, increment nextIndex
 							fmt.Print("append entry returned success")
 							node.nextIndex[peer.serverID] += 1
 						}
+						fmt.Println("VALUE OF REPLY ", reply.Success)
+
 					}
 				}
 			}
+			//add a wait for nodes to all finish
+			//if majority ovtes yes, check in same way as leader election
+			//node.commitIndex += 1
+
 		} else {
 			// If the node is no longer the leader, stop sending heartbeats
-			fmt.Println("else statement of CLientCall")
+			fmt.Println("node is not the leader, don't call clientCall")
 			// node.Mutex.Unlock()
 			//return
 		}
-		time.Sleep(40 * time.Millisecond)
+		time.Sleep(4000 * time.Millisecond) //40
 	}
 	// HINT 2: force the thread to sleep for a good amount of time (less
 	//than that of the leader election timer) and then repeat the actions above.
@@ -176,6 +167,9 @@ func (node *RaftNode) ClientAddToLog() {
 // Hint 1: Use the description in Figure 2 of the paper
 // Hint 2: Only focus on the details related to leader election and heartbeats
 func (node *RaftNode) AppendEntry(arguments AppendEntryArgument, reply *AppendEntryReply) error {
+
+	// check the term that is coming in
+
 	node.Mutex.Lock()
 	defer node.Mutex.Unlock()
 	//fmt.Println("heartbeat from", arguments.LeaderID)
@@ -185,6 +179,7 @@ func (node *RaftNode) AppendEntry(arguments AppendEntryArgument, reply *AppendEn
 		// Reply false if leader's term is older
 		reply.Term = node.currentTerm
 		reply.Success = false
+
 	} else {
 		// Update term to match the leader's term and transition to follower state
 		node.currentTerm = arguments.Term
@@ -193,33 +188,53 @@ func (node *RaftNode) AppendEntry(arguments AppendEntryArgument, reply *AppendEn
 		// Reset the election timeout as the leader is now active
 		node.resetElectionTimeout()
 
-		// Next assignment implmentation
+		fmt.Println("in term ", arguments.Term, "passed entry: ", arguments.Entries)
 
 		// Reply to the leader with success
 		reply.Term = node.currentTerm
 
 		//base case, list is empty
 		if len(node.log) == 0 {
-			//empty log, append
+			//empty log, append entries
+			// is it a heartbeat or what (if entry is)
 			fmt.Println("Log is empty")
+			node.log = append(node.log, arguments.Entries)
+			node.commitIndex += 1
 			reply.Success = true
-			//append entries
 
 		} else if (len(node.log) - 1) < arguments.PrevLogIndex {
 			//this is if the log doesn't contain an entry at prevLogIndex
 			reply.Success = false
 			fmt.Print("the follower log does not contain an entry at prevLogIndex ", arguments.PrevLogIndex)
-		}
 
-		//the follower's log has too many entries
-		if len(node.log)-1 > arguments.PrevLogIndex {
+		} else if (len(node.log) - 1) > arguments.PrevLogIndex {
+			fmt.Println("Length of log:", len(node.log))
+			fmt.Println("PrevLogIndex:", arguments.PrevLogIndex)
+			//the follower's log has too many entries
+			fmt.Println("LOG IS TOO LONG FOR NODE ", node.selfID)
 			//delete any logs that are at a higher index that prevLogIndex,
 			//node.log = node.log[0:node.log[prevLogIndex -1]] //delete that entry and all that follow
 			if node.log[arguments.PrevLogIndex].Term != arguments.PrevLogTerm {
 				node.log = node.log[0 : arguments.PrevLogIndex-1] //delete that entry and all that follow
 				reply.Success = false
 			}
+		} else if (len(node.log) - 1) == arguments.PrevLogIndex { //length of node log is at least as up to date as leader's
+			fmt.Println("LOG IS CORRECT LENGTH FOR NODE ", node.selfID)
+			if node.log[arguments.PrevLogIndex].Term != arguments.PrevLogTerm {
+				fmt.Println("LOG HAS WRONG TERM ENTRY FOR NODE ", node.selfID)
+				node.log = node.log[0:arguments.PrevLogIndex] //#delete that entry and all that follow
+				reply.Success = false
+			} else {
+				//append new entries in log
+				fmt.Println("APPENDING SUCCEEDS FOR NODE ", node.selfID)
+				node.log = append(node.log, arguments.Entries)
+				node.commitIndex += 1
+				reply.Success = true
+			}
 		}
+
+		fmt.Println("NODE ", node.selfID, "'S LOG: ", node.log)
+
 		/*
 			if ((len(node.log) -1) < prevLogIndex)      0, 1, 2, 3, 4, 5, 6  index = 6 - 1
 				#log doesn't contain an entry at prevLogIndex,																						 0, 1, 2, 3, 4
@@ -244,7 +259,7 @@ func (node *RaftNode) AppendEntry(arguments AppendEntryArgument, reply *AppendEn
 				}
 			}
 		*/
-		//reply.Success = true
+
 	}
 
 	return nil
@@ -582,54 +597,4 @@ func main() {
 	update node's committedIndex every appendEntry to be either leader's commitIndex or index of last new enty
 4. If majority of the servers replicate it then leader commits entry, notifies servers it has committed
 
-*/
-
-/*Questions:
-1. When the follower log is greater than the leader's do we have to check for inconsistency and then delete or can we just
-straight up delete everything
-2. Should we make the arguments (AppendEntryArgument) in ClientAddToLog dependent on PrevLogIndex commitIndex?
-*/
-
-/*
-In append entry, if terms all works:
-if ((len(node.log) -1) < prevLogIndex)      0, 1, 2, 3, 4, 5, 6  index = 6 - 1
-	#log doesn't contain an entry at prevLogIndex,																						 0, 1, 2, 3, 4
-{
-	reply false #client side decrements stuff and retries
-}
-if (len(node.log) -1 > prevLogIndex){
-	//delete any logs that are at a higher index that prevLogIndex,
-	node.log = node.log[0:node.log[prevLogIndex -1] #delete that entry and all that follow
-	if (node.log[prevLogIndex].term != prevLogTerm){
-		node.log = node.log[0:node.log[prevLogIndex -1] #delete that entry and all that follow
-		return false #so that the client will decrement nextINdex until it gets to the newly shortened lsit for this node
-	}
-}else if (len(node.log) -1 == prevLogIndex) #length of node log is at least as up to date as leader's
-{
-	if (node.log[prevLogIndex].term != prevLogTerm){
-		node.log = node.log[0:node.log[prevLogIndex -1] #delete that entry and all that follow
-		return false
-	}else{
-		#append new entries in log
-		return true
-	}
-}
-
-node.log = node.log[0:node.log[prevLogIndex -1] #delete that entry and all that follow
-next
-
-[(0, 1), (1, 2) (2, 2) , (3, 3) (4, 3), (5, 6), (6, 7)] - follower //the nextIndex value for followers nodes is also the entry of the leader's log that we send
-[(0, 1), (1, 2) (2, 2), (3, 2), (4, 3) next: (5, 3), ->---] - leader
-
--------
-In Client Call
-when receive false from RPC:
-1. check that terms work and this is indeed leader node. If term is up to date, false returned bc of node log entry out of date
-	decrement the nextIndex value for that node, and try again until success, where it passes log[nextIndex] as its entry
-	prevLogIndex= nextIndex[node #] - 1 #used to check for log consistency
-	//if true is returned, increment nextIndex[node #]
-
-
-
-	is prevLogIndex going to change if follower node out of date?
 */
